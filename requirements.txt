@@ -1,5 +1,6 @@
 streamlit
 rdkit
 py3Dmol
-psi4
+pyscf
+geometric
 numpy

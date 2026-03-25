@@ -3,23 +3,25 @@ import streamlit.components.v1 as components
 
 # --- Imports ---
 try:
-    import psi4
+    from pyscf import gto, scf
+    from pyscf.geomopt.geometric_solver import optimize as geom_optimize
     from rdkit import Chem
     from rdkit.Chem import AllChem
     import py3Dmol
-    PSI4_READY = True
+    import numpy as np
+    PYSCF_READY = True
 except ImportError:
-    PSI4_READY = False
+    PYSCF_READY = False
 
 # --- Page Configuration ---
 st.set_page_config(page_title="Computational Chemistry - ChemieLearn", layout="wide")
 
 st.title("💻 Computational Chemistry")
-st.markdown("### Quantum Chemistry with Psi4")
+st.markdown("### Quantum Chemistry with PySCF")
 
-if not PSI4_READY:
-    st.error("⚠️ **Libraries missing.** Please install `psi4`, `rdkit`, and `py3Dmol`.")
-    st.code("pip install psi4 rdkit py3Dmol", language='bash')
+if not PYSCF_READY:
+    st.error("⚠️ **Libraries missing.** Please install `pyscf`, `geometric`, `rdkit`, and `py3Dmol`.")
+    st.code("pip install pyscf geometric rdkit py3Dmol", language='bash')
     st.stop()
 
 # --- Helper Functions ---
@@ -51,13 +53,13 @@ def rdkit_pre_optimization(smiles):
         try:
             AllChem.MMFFOptimizeMolecule(mol)
         except:
-            # Fallback to UFF if MMFF fails (e.g., for some metal complexes)
+            # Fallback to UFF if MMFF fails
             try:
                 AllChem.UFFOptimizeMolecule(mol)
             except:
-                pass # Proceed with unoptimized if force fields fail
+                pass
 
-        # Convert to XYZ string for Psi4
+        # Convert to XYZ string
         xyz_lines = []
         conf = mol.GetConformer()
         for i in range(num_atoms):
@@ -71,41 +73,53 @@ def rdkit_pre_optimization(smiles):
     except Exception as e:
         return None, f"RDKit Error: {str(e)}"
 
-def run_psi4_optimization(xyz_string, method, basis):
+def run_pyscf_optimization(xyz_string, method, basis):
     """
-    Runs Psi4 geometry optimization.
-    Returns: Final Energy, Log, and Optimized XYZ coordinates.
+    Runs PySCF geometry optimization.
+    Returns: Final Energy, Optimized XYZ string.
     """
     try:
-        # Clean previous runs
-        psi4.core.clean()
-        psi4.set_memory('500 MB')
-        psi4.set_num_threads(2)
+        # 1. Build PySCF Molecule
+        # PySCF requires geometry in a specific format (units Angstrom)
+        mol = gto.M(atom=xyz_string, basis=basis, unit='Angstrom', charge=0, spin=0)
         
-        # Define Molecule (assuming charge 0, multiplicity 1 for simplicity)
-        mol = psi4.geometry(f"""
-        {xyz_string}
-        symmetry c1
-        """)
+        # 2. Define Method
+        if method == "HF":
+            mf = scf.RHF(mol)
+        elif method == "B3LYP":
+            # DFT requires defining the functional
+            mf = scf.RKS(mol)
+            mf.xc = 'b3lyp'
+        else:
+            return None, None, "Method not supported."
+
+        # 3. Run Optimization
+        # 'geometric' library handles the optimization loop
+        # We set max steps to keep it fast for web demo
+        opt_config = {'convergence_set': 'GAU'} 
         
-        # Set options
-        psi4.set_options({
-            'basis': basis,
-            'scf_type': 'df',
-            'e_convergence': 1e-5,
-            'g_convergence': 'gau_loose'
-        })
+        # Run optimization
+        # Note: PySCF geomopt returns the new molecule object
+        mol_eq = geom_optimize(mf, **opt_config)
         
-        # Run Optimization
-        energy = psi4.optimize(f'{method}/{basis}', molecule=mol)
+        # 4. Get Final Energy
+        final_energy = mf.e_tot
+
+        # 5. Extract Optimized Geometry
+        # PySCF stores geometry in mol_eq.atom_coords() (Bohr usually)
+        coords = mol_eq.atom_coords(unit='Angstrom')
+        symbols = [mol_eq.atom_symbol(i) for i in range(mol_eq.natm)]
         
-        # Get optimized geometry
-        optimized_xyz = mol.save_string_xyz()
+        opt_xyz_lines = []
+        for i in range(mol_eq.natm):
+            opt_xyz_lines.append(f"{symbols[i]} {coords[i][0]:.6f} {coords[i][1]:.6f} {coords[i][2]:.6f}")
         
-        return energy, optimized_xyz, "Calculation Successful."
+        opt_xyz = "\n".join(opt_xyz_lines)
+        
+        return final_energy, opt_xyz, "Calculation Successful."
         
     except Exception as e:
-        return None, None, f"Psi4 Error: {str(e)}"
+        return None, None, f"PySCF Error: {str(e)}"
 
 def draw_3d(xyz_string, width=500, height=400):
     view = py3Dmol.view(width=width, height=height)
@@ -139,28 +153,24 @@ if st.button("🚀 Run Calculation"):
             rdkit_mol, xyz_data = rdkit_pre_optimization(smiles_input)
         
         if not rdkit_mol:
-            st.error(xyz_data) # Error message is returned in xyz_data variable
+            st.error(xyz_data) 
         else:
-            # Display Initial Structure
             with st.expander("👁️ View Pre-optimized Input Structure"):
-                # Convert rdkit mol to xyz for viewing
-                init_xyz = xyz_data
-                view = draw_3d(init_xyz)
+                view = draw_3d(xyz_data)
                 components.html(view._make_html(), width=400, height=300, scrolling=False)
 
-            # Step 2: Psi4 Optimization
+            # Step 2: PySCF Optimization
             progress_bar = st.progress(0)
             progress_bar.progress(50)
             
-            with st.spinner(f"2. Running Psi4 Optimization ({method}/{basis})..."):
-                energy, opt_xyz, log_msg = run_psi4_optimization(xyz_data, method, basis)
+            with st.spinner(f"2. Running PySCF Optimization ({method}/{basis})..."):
+                energy, opt_xyz, log_msg = run_pyscf_optimization(xyz_data, method, basis)
             
             progress_bar.progress(100)
 
             if energy:
                 st.success("✅ Calculation Complete!")
                 
-                # Display Results
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -168,7 +178,6 @@ if st.button("🚀 Run Calculation"):
                     st.metric("Final Energy", f"{energy:.6f} Hartree")
                     st.info(f"Method: {method}/{basis}")
                     
-                    # Download button for XYZ
                     st.download_button(
                         label="📥 Download Optimized Coordinates (.xyz)",
                         data=opt_xyz,
