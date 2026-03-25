@@ -54,8 +54,8 @@ def rdkit_pre_optimization(smiles):
         mol = Chem.AddHs(mol)
         num_atoms = mol.GetNumAtoms()
         
-        if num_atoms > 20:
-            return None, f"**Atom limit exceeded:** {num_atoms} atoms found. Maximum allowed is 20."
+        if num_atoms > 30:
+            return None, f"**Atom limit exceeded:** {num_atoms} atoms found. Maximum allowed is 30."
         
         res = AllChem.EmbedMolecule(mol, AllChem.ETKDGv3())
         if res == -1: return None, "Could not generate 3D coordinates."
@@ -127,7 +127,7 @@ def run_pyscf_optimization(xyz_string, method, basis):
             
         # Prepend Summary
         summary = f"""============================================
-CHEMIELEARN CALCULATION SUMMARY
+CALCULATION SUMMARY
 ============================================
 Method:     {method}/{basis}
 Status:     Converged
@@ -135,8 +135,6 @@ Energy:     {final_energy:.8f} Hartree
 Time:       {end_time - start_time:.3f} seconds
 Atoms:      {mol_eq.natm}
 ============================================
-
-{clean_log}
 """
         
         # Extract Geometry for Viewer
@@ -168,13 +166,9 @@ basis = st.sidebar.selectbox("Basis Set", ["sto-3g", "6-31g"], index=0)
 
 # --- Main Input ---
 st.markdown("Enter a **SMILES** string to calculate geometry and energy.")
-st.warning("⚠️ **Limit:** Maximum 20 atoms.")
+st.warning("⚠️ **Limit:** Maximum 30 atoms.")
 
-examples = {"Water (3 atoms)": "O", "Methane (5 atoms)": "C", "Ethanol (9 atoms)": "CCO"}
-selected = st.selectbox("Quick Examples:", [""] + list(examples.keys()))
-default_smiles = examples.get(selected, "")
-
-smiles_input = st.text_input("SMILES Input:", value=default_smiles, placeholder="e.g., O for water")
+smiles_input = st.text_input("SMILES Input:", placeholder="e.g. C1=CC=CC=C1 for Benzene")
 
 # --- Process ---
 col_btn, col_clear = st.columns([1, 1])
