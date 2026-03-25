@@ -1,5 +1,5 @@
 streamlit
-rdkit
+rdkit-pypi
 py3Dmol
 pyscf
 geometric
