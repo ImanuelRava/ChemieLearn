@@ -1,0 +1,5 @@
+streamlit
+rdkit
+py3Dmol
+psi4
+numpy
