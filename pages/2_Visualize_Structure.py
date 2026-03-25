@@ -7,7 +7,7 @@ import py3Dmol
 from io import BytesIO
 
 # --- Page Configuration ---
-st.set_page_config(page_title="Chemical Structure Visualizer - ChemieLearn", layout="wide")
+st.set_page_config(page_title="Molecule Visualizer - ChemieLearn", layout="wide", page_icon="favicon.ico")
 
 st.title("🔬 Chemical Structure Visualizer")
 st.markdown("Use this tool to visualize structures in **2D** and interactive **3D** from SMILES strings.")

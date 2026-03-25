@@ -19,7 +19,7 @@ except ImportError:
     PYSCF_READY = False
 
 # --- Page Configuration ---
-st.set_page_config(page_title="Computational Chemistry - ChemieLearn", layout="wide")
+st.set_page_config(page_title="Computational Chemistry - ChemieLearn", layout="wide", page_icon="favicon.ico")
 
 st.title("💻 Computational Chemistry")
 st.markdown("### Quantum Chemistry with PySCF")

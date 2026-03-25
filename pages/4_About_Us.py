@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.set_page_config(page_title="About Us - ChemieLearn", layout="wide")
+st.set_page_config(page_title="About Us - ChemieLearn", layout="wide", page_icon="favicon.ico")
 
 st.title("About Us")
 

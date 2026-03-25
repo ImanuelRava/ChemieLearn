@@ -1,7 +1,7 @@
 import streamlit as st
 
 # --- Page Configuration ---
-st.set_page_config(page_title="Chemistry Lecture - ChemieLearn", layout="wide")
+st.set_page_config(page_title="Chemistry Lecture - ChemieLearn", layout="wide", page_icon="favicon.ico")
 
 # --- CSS Styling ---
 st.markdown("""

@@ -4,7 +4,7 @@ import time
 # --- Page Configuration ---
 st.set_page_config(
     page_title="ChemieLearn",
-    page_icon="🎓",
+    page_icon="favicon.ico",
     layout="wide",
     initial_sidebar_state="expanded",
 )
