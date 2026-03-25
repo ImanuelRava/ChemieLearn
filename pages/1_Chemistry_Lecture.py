@@ -31,7 +31,7 @@ units = [
 ]
 
 # --- MAIN PAGE LOGIC ---
-st.title("Chemistry Lecture")
+st.title("👨‍🏫 Chemistry Lecture")
 st.markdown("### Course Units")
 
 for unit in units:
