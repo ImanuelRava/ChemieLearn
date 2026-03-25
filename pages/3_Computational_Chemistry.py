@@ -135,6 +135,8 @@ Energy:     {final_energy:.8f} Hartree
 Time:       {end_time - start_time:.3f} seconds
 Atoms:      {mol_eq.natm}
 ============================================
+
+{clean_log}
 """
         
         # Extract Geometry for Viewer
@@ -168,7 +170,7 @@ basis = st.sidebar.selectbox("Basis Set", ["sto-3g", "6-31g"], index=0)
 st.markdown("Enter a **SMILES** string to calculate geometry and energy.")
 st.warning("⚠️ **Limit:** Maximum 30 atoms.")
 
-smiles_input = st.text_input("SMILES Input:", placeholder="e.g. C1=CC=CC=C1 for Benzene")
+smiles_input = st.text_input("SMILES Input:", placeholder="e.g., C1=CC=CC=C1 for Benzene")
 
 # --- Process ---
 col_btn, col_clear = st.columns([1, 1])
@@ -178,7 +180,7 @@ with col_btn:
         if not smiles_input:
             st.warning("Please enter a SMILES string.")
         else:
-            with st.spinner("1. Pre-optimizing (MMFF94s)..."):
+            with st.spinner("Pre-optimizing (MMFF94s)..."):
                 rdkit_mol, xyz_data = rdkit_pre_optimization(smiles_input)
             
             if not rdkit_mol:
@@ -187,7 +189,7 @@ with col_btn:
             else:
                 st.session_state.input_xyz = xyz_data
                 
-                with st.spinner(f"2. Running PySCF Optimization ({method}/{basis})..."):
+                with st.spinner(f"Running PySCF Optimization ({method}/{basis})..."):
                     energy, opt_xyz, log_text = run_pyscf_optimization(xyz_data, method, basis)
                 
                 if energy:
