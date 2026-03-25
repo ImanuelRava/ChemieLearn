@@ -2,6 +2,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 import sys
 import io
+import time
+import contextlib
 
 # --- Imports ---
 try:
@@ -27,7 +29,6 @@ if not PYSCF_READY:
     st.stop()
 
 # --- Session State Initialization ---
-# We store results here so they don't disappear when clicking tabs
 if 'opt_energy' not in st.session_state:
     st.session_state.opt_energy = None
 if 'opt_xyz' not in st.session_state:
@@ -46,8 +47,8 @@ def rdkit_pre_optimization(smiles):
         mol = Chem.AddHs(mol)
         num_atoms = mol.GetNumAtoms()
         
-        if num_atoms > 20:
-            return None, f"**Atom limit exceeded:** {num_atoms} atoms found. Maximum allowed is 20."
+        if num_atoms > 30:
+            return None, f"**Atom limit exceeded:** {num_atoms} atoms found. Maximum allowed is 30."
         
         res = AllChem.EmbedMolecule(mol, AllChem.ETKDGv3())
         if res == -1: return None, "Could not generate 3D coordinates."
@@ -70,28 +71,60 @@ def rdkit_pre_optimization(smiles):
 
 def run_pyscf_optimization(xyz_string, method, basis):
     try:
-        # Clean Geometry (skip first 2 lines)
+        # Clean Geometry
         lines = xyz_string.strip().split('\n')
         geom_clean = "\n".join(lines[2:])
 
-        old_stdout = sys.stdout
-        sys.stdout = output_buffer = io.StringIO()
-
-        mol = gto.M(atom=geom_clean, basis=basis, unit='Angstrom', charge=0, spin=0)
+        # --- CAPTURE LOGS ---
+        # Create buffers for stdout and stderr
+        stdout_capture = io.StringIO()
+        stderr_capture = io.StringIO()
         
-        if method == "HF":
-            mf = scf.RHF(mol)
-        elif method == "B3LYP":
-            mf = scf.RKS(mol)
-            mf.xc = 'b3lyp'
-        else:
-            sys.stdout = old_stdout
-            return None, None, "Method not supported."
-
-        mol_eq = geom_optimize(mf, convergence_set='GAU')
+        # Timer
+        start_time = time.time()
         
-        final_energy = mf.e_tot
+        # Redirect both stdout and stderr
+        with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(stderr_capture):
+            mol = gto.M(atom=geom_clean, basis=basis, unit='Angstrom', charge=0, spin=0)
+            
+            if method == "HF":
+                mf = scf.RHF(mol)
+            elif method == "B3LYP":
+                mf = scf.RKS(mol)
+                mf.xc = 'b3lyp'
+            else:
+                return None, None, "Method not supported.", "Error"
 
+            # Run Optimization
+            mol_eq = geom_optimize(mf, convergence_set='GAU')
+            
+            final_energy = mf.e_tot
+
+        end_time = time.time()
+        
+        # --- CONSTRUCT LOG ---
+        # Combine captured streams
+        raw_log = stdout_capture.getvalue() + "\n" + stderr_capture.getvalue()
+        
+        # Create a clean summary if capture failed (C-level streams bypass Python)
+        if not raw_log.strip():
+            raw_log = "(Detailed console output available in terminal/logs)"
+            
+        # Prepend our generated summary
+        summary = f"""============================================
+CALCULATION SUMMARY
+============================================
+Method:     {method}/{basis}
+Status:     Converged
+Energy:     {final_energy:.8f} Hartree
+Time:       {end_time - start_time:.3f} seconds
+Atoms:      {mol_eq.natm}
+============================================
+
+{raw_log}
+"""
+        
+        # Extract Geometry for Viewer
         coords = mol_eq.atom_coords(unit='Angstrom')
         symbols = [mol_eq.atom_symbol(i) for i in range(mol_eq.natm)]
         
@@ -101,14 +134,10 @@ def run_pyscf_optimization(xyz_string, method, basis):
         
         opt_xyz = "\n".join(opt_xyz_lines)
         
-        sys.stdout = old_stdout
-        log_output = output_buffer.getvalue()
-        
-        return final_energy, opt_xyz, log_output
+        return final_energy, opt_xyz, summary
         
     except Exception as e:
-        sys.stdout = old_stdout
-        return None, None, f"PySCF Error: {str(e)}"
+        return None, None, f"PySCF Error: {str(e)}", "Error occurred."
 
 def draw_3d(xyz_string, width=400, height=400):
     view = py3Dmol.view(width=width, height=height)
@@ -124,16 +153,11 @@ basis = st.sidebar.selectbox("Basis Set", ["sto-3g", "6-31g"], index=0)
 
 # --- Main Input ---
 st.markdown("Enter a **SMILES** string to calculate geometry and energy.")
-st.warning("⚠️ **Limit:** Maximum 20 atoms.")
+st.warning("⚠️ **Limit:** Maximum 30 atoms.")
 
-examples = {"Water (3 atoms)": "O", "Methane (5 atoms)": "C", "Ethanol (9 atoms)": "CCO"}
-selected = st.selectbox("Quick Examples:", [""] + list(examples.keys()))
-default_smiles = examples.get(selected, "")
-
-smiles_input = st.text_input("SMILES Input:", value=default_smiles, placeholder="e.g., O for water")
+smiles_input = st.text_input("SMILES Input:", placeholder="e.g., O for water")
 
 # --- Process ---
-# We use columns to put the button and clear button side by side
 col_btn, col_clear = st.columns([1, 1])
 
 with col_btn:
@@ -141,24 +165,19 @@ with col_btn:
         if not smiles_input:
             st.warning("Please enter a SMILES string.")
         else:
-            # Step 1: RDKit
             with st.spinner("1. Pre-optimizing (MMFF94s)..."):
                 rdkit_mol, xyz_data = rdkit_pre_optimization(smiles_input)
             
             if not rdkit_mol:
                 st.error(xyz_data)
-                # Clear previous results if error
                 st.session_state.opt_energy = None
             else:
-                # Save input structure to session state
                 st.session_state.input_xyz = xyz_data
                 
-                # Step 2: PySCF
                 with st.spinner(f"2. Running PySCF Optimization ({method}/{basis})..."):
                     energy, opt_xyz, log_text = run_pyscf_optimization(xyz_data, method, basis)
                 
                 if energy:
-                    # Save results to session state
                     st.session_state.opt_energy = energy
                     st.session_state.opt_xyz = opt_xyz
                     st.session_state.opt_log = log_text
@@ -168,7 +187,6 @@ with col_btn:
                     st.session_state.opt_energy = None
 
 with col_clear:
-    # Button to clear results
     if st.button("🗑️ Clear Results"):
         st.session_state.opt_energy = None
         st.session_state.opt_xyz = None
@@ -176,19 +194,15 @@ with col_clear:
         st.session_state.input_xyz = None
         st.rerun()
 
-# --- Display Results (Outside the Button Block) ---
-# This ensures results persist when clicking tabs
-
+# --- Display Results ---
 if st.session_state.opt_energy is not None:
     st.markdown("---")
     
-    # 1. Show Input Structure
     if st.session_state.input_xyz:
         with st.expander("👁️ View Pre-optimized Input Structure"):
             view = draw_3d(st.session_state.input_xyz)
             components.html(view._make_html(), width=400, height=400, scrolling=False)
 
-    # 2. Show Results in Tabs
     tab1, tab2, tab3 = st.tabs(["📊 Results", "📜 Optimization Log", "🔬 Optimized Structure"])
     
     with tab1:
@@ -203,7 +217,7 @@ if st.session_state.opt_energy is not None:
         st.text_area("Optimized Coordinates (XYZ)", st.session_state.opt_xyz, height=200)
     
     with tab2:
-        st.markdown("**Raw Output:**")
+        st.markdown("**Calculation Output:**")
         st.code(st.session_state.opt_log, language='log')
     
     with tab3:
@@ -211,7 +225,6 @@ if st.session_state.opt_energy is not None:
         components.html(view._make_html(), width=500, height=400, scrolling=False)
 
 elif st.session_state.input_xyz is not None:
-    # If we have input but calculation hasn't run or failed
     with st.expander("👁️ View Pre-optimized Input Structure"):
         view = draw_3d(st.session_state.input_xyz)
         components.html(view._make_html(), width=400, height=400, scrolling=False)
