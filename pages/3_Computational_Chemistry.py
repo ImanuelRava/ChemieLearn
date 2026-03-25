@@ -4,6 +4,7 @@ import sys
 import io
 import time
 import contextlib
+import re
 
 # --- Imports ---
 try:
@@ -39,6 +40,12 @@ if 'input_xyz' not in st.session_state:
     st.session_state.input_xyz = None
 
 # --- Helper Functions ---
+
+def strip_ansi_codes(text):
+    """Remove ANSI escape sequences (colors) from string."""
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    return ansi_escape.sub('', text)
+
 def rdkit_pre_optimization(smiles):
     try:
         mol = Chem.MolFromSmiles(smiles)
@@ -47,8 +54,8 @@ def rdkit_pre_optimization(smiles):
         mol = Chem.AddHs(mol)
         num_atoms = mol.GetNumAtoms()
         
-        if num_atoms > 30:
-            return None, f"**Atom limit exceeded:** {num_atoms} atoms found. Maximum allowed is 30."
+        if num_atoms > 20:
+            return None, f"**Atom limit exceeded:** {num_atoms} atoms found. Maximum allowed is 20."
         
         res = AllChem.EmbedMolecule(mol, AllChem.ETKDGv3())
         if res == -1: return None, "Could not generate 3D coordinates."
@@ -76,15 +83,14 @@ def run_pyscf_optimization(xyz_string, method, basis):
         geom_clean = "\n".join(lines[2:])
 
         # --- CAPTURE LOGS ---
-        # Create buffers for stdout and stderr
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()
         
-        # Timer
         start_time = time.time()
         
         # Redirect both stdout and stderr
         with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(stderr_capture):
+            # 1. Setup Initial Calculation
             mol = gto.M(atom=geom_clean, basis=basis, unit='Angstrom', charge=0, spin=0)
             
             if method == "HF":
@@ -95,24 +101,33 @@ def run_pyscf_optimization(xyz_string, method, basis):
             else:
                 return None, None, "Method not supported.", "Error"
 
-            # Run Optimization
+            # 2. Run Optimization
+            # This returns the optimized molecule object
             mol_eq = geom_optimize(mf, convergence_set='GAU')
             
-            final_energy = mf.e_tot
+            # 3. Calculate Final Energy Accurately
+            # We run a single point calculation on the optimized geometry
+            # This ensures mf.e_tot is strictly correct and updated.
+            mf_final = scf.RHF(mol_eq) if method == "HF" else scf.RKS(mol_eq)
+            if method == "B3LYP": mf_final.xc = 'b3lyp'
+            mf_final.kernel()
+            final_energy = mf_final.e_tot
 
         end_time = time.time()
         
         # --- CONSTRUCT LOG ---
-        # Combine captured streams
         raw_log = stdout_capture.getvalue() + "\n" + stderr_capture.getvalue()
         
-        # Create a clean summary if capture failed (C-level streams bypass Python)
-        if not raw_log.strip():
-            raw_log = "(Detailed console output available in terminal/logs)"
+        # Clean ANSI codes
+        clean_log = strip_ansi_codes(raw_log)
+        
+        # Remove the large Geometric ASCII art logo to save space
+        # It usually starts with '())))))' and ends before 'geomeTRIC started'
+        clean_log = re.sub(r"(\(\)\)+.*?geomeTRIC started)", "geomeTRIC started", clean_log, flags=re.DOTALL)
             
-        # Prepend our generated summary
+        # Prepend Summary
         summary = f"""============================================
-CALCULATION SUMMARY
+CHEMIELEARN CALCULATION SUMMARY
 ============================================
 Method:     {method}/{basis}
 Status:     Converged
@@ -121,7 +136,7 @@ Time:       {end_time - start_time:.3f} seconds
 Atoms:      {mol_eq.natm}
 ============================================
 
-{raw_log}
+{clean_log}
 """
         
         # Extract Geometry for Viewer
@@ -153,9 +168,13 @@ basis = st.sidebar.selectbox("Basis Set", ["sto-3g", "6-31g"], index=0)
 
 # --- Main Input ---
 st.markdown("Enter a **SMILES** string to calculate geometry and energy.")
-st.warning("⚠️ **Limit:** Maximum 30 atoms.")
+st.warning("⚠️ **Limit:** Maximum 20 atoms.")
 
-smiles_input = st.text_input("SMILES Input:", placeholder="e.g., O for water")
+examples = {"Water (3 atoms)": "O", "Methane (5 atoms)": "C", "Ethanol (9 atoms)": "CCO"}
+selected = st.selectbox("Quick Examples:", [""] + list(examples.keys()))
+default_smiles = examples.get(selected, "")
+
+smiles_input = st.text_input("SMILES Input:", value=default_smiles, placeholder="e.g., O for water")
 
 # --- Process ---
 col_btn, col_clear = st.columns([1, 1])
